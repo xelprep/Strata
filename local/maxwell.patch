@@ -1,0 +1,36 @@
+diff --git a/setup.py b/setup.py
+index bd59a306..159112aa 100644
+--- a/setup.py
++++ b/setup.py
+@@ -1658,7 +1658,10 @@ def experimental_sm60() -> bool:
+ 
+ 
+ def sm60_card(arch) -> bool:
+-    return 60 <= int(arch) <= 70
++    # Experimental CUDA 12 builds: Maxwell sm_52, Pascal sm_60/61,
++    # and Volta sm_70.
++    arch = int(arch)
++    return arch == 52 or 60 <= arch <= 70
+ 
+ 
+ def maxwell_card(arch) -> bool:
+diff --git a/src/core/device.cu b/src/core/device.cu
+index 5c59554b..9d3cb887 100644
+--- a/src/core/device.cu
++++ b/src/core/device.cu
+@@ -306,11 +306,11 @@ DeviceInfo device_info(int ordinal) {
+     d.arch = base_arch(p.gcnArchName);
+     if (const std::string why = arch_problem(p, ordinal); !why.empty()) throw CudaError(why, -1);
+ #else
+-    // #236: the experimental build (-DSTRATA_EXPERIMENTAL_SM60=ON: Pascal sm_60, Volta sm_70) runs on the cards it
+-    // was built for - refusing them below 7.5 there made the flag useless; the release engine keeps 7.5
++    // #236: the experimental build (-DSTRATA_EXPERIMENTAL_SM60=ON: Maxwell sm_52, Pascal sm_60, Volta sm_70) runs
++    // on the cards it was built for - refusing them below 7.5 there made the flag useless; the release engine keeps 7.5
+ #if defined(STRATA_EXPERIMENTAL_SM60)
+-    constexpr int kMinCc = 60;
+-    const char* const kNeed = "6.0 or newer (this is the experimental Pascal / Volta build)";
++    constexpr int kMinCc = 52;
++    const char* const kNeed = "5.2 or newer (this is the experimental Maxwell / Pascal / Volta build)";
+ #else
+     constexpr int kMinCc = 75;
+     const char* const kNeed = "7.5 or newer (RTX 20 / 30 / 40 / 50 series)";

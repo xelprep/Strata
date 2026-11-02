@@ -1,0 +1,71 @@
+# Local Maxwell (sm_52) build — not upstream
+
+This folder holds the changes that run Strata on an older NVIDIA Maxwell card
+(compute capability 5.2). They are deliberately **not** upstreamed: they live
+only on our fork (xelprep/Strata), tracked on `main`. Upstream never has a
+`local/` path — checked 2026-10-31: no commit of Niko1221/Strata ever touched
+one — so pulling upstream changes into the fork never conflicts with this
+folder. One fork-only commit does end fast-forward syncs: from now on,
+`git pull --ff-only upstream/main` stops working; take a real merge instead
+(never conflicts, upstream has no `local/` paths), or rebase the fork commit
+onto the new upstream:
+
+    git fetch upstream
+    git merge upstream/main            # merge commit, conflict-free
+    git push origin main               # the fork carries upstream + local/
+
+GitHub's own Sync-fork button no longer works (a fork with commits upstream
+lacks cannot be synced from GitHub), so keep the fork synced this way. The
+patch itself stays data: upstream still changing the patched files only
+matters at image build — `patch -p1 --dry-run` is checked there, and the
+regenerate recipe below is the way back if it ever fails.
+
+## How it works
+
+- `maxwell.patch` — the changes upstream still lacks (as of the pull on
+  2026-10-31, v0.2.9): `src/core/device.cu` (the experimental build's runtime floor —
+  upstream's #3218 put the sm_52 floor in CMake but left the runtime check at
+  6.0, so a stock v0.2.9 engine built for 52 refuses itself at start) and
+  `setup.py` (`sm60_card` must admit 52, or the Terminal's launch path calls a
+  Maxwell card "not supported" — upstream's `maxwell_card`/`maxwell_note` only
+  print a warning and stop). Upstream's own Maxwell section of docs/OLDER_GPUS.md
+  (#3218) covers the CMake half now, so the patch no longer touches CMakeLists.txt.
+- `Dockerfile` — a port of upstream's **new** source-build Dockerfile (upstream
+  rewrote it on 2026-10-26: three stages, the engine shipped as an engine
+  component package in `/opt/strata/components/engine`, entrypoint moved to
+  `docker/entrypoint.sh`, root `docker-entrypoint.sh` deleted). Maxwell tweaks
+  kept: CUDA 12.9 base image, `CUDA_ARCHITECTURES=52` (upstream's own loop now
+  turns `-DSTRATA_EXPERIMENTAL_SM60=ON` on by itself for archs below 75), the
+  patch applied in stage 1 (engine sources) AND stage 2 (so the Terminal bundle
+  carries the patched setup.py), `BUILD_VISION=0` as in upstream's CUDA 12 recipe.
+  The old single-stage BUILD.json stamp flow is gone.
+
+## Build (on the PC the card is in)
+
+    git pull                              # origin = our fork: carries upstream + local/
+    cp local/Dockerfile Dockerfile        # the local image layer
+    docker build -t strata-maxwell --build-arg CUDA_ARCHITECTURES=52 \
+                 --build-arg STRATA_COMMIT=$(git rev-parse HEAD) .
+
+The Dockerfile applies `local/maxwell.patch` during the build, so the patch must
+stay in sync with the checkout it applies to. If `patch -p1 < local/maxwell.patch`
+fails during a build, upstream changed one of the patched files: regenerate the
+patch against the new checkout:
+
+    git checkout -- setup.py src/core/device.cu   # if needed
+    git --no-pager diff -- setup.py src/core/device.cu > local/maxwell.patch
+
+(Regenerate only the engine-source files — the Dockerfile changes live in
+`local/Dockerfile` itself, not in the patch.)
+
+## After an upstream pull
+
+The engine comes from the docker build now (stage 1 packages it for the image),
+not from a BUILD.json stamp: after a pull that touches the engine sources,
+rebuild the image (`docker build` recompiles the sm_52 engine once); the model
+files, the prepared pack and the install config on the `/data` volume are never
+touched.
+
+Checked against the 2026-10-31 pull (v0.2.9): the regenerated 36-line patch
+applies with no rejected hunks (`patch -p1 --dry-run`). The Docker build itself
+was not run here — it has to happen on the PC the Maxwell card is in.
