@@ -7,7 +7,10 @@
 #   - CUDA 12.9 base image instead of CUDA 13 (CUDA 13 cannot compile for Maxwell);
 #   - CUDA_ARCHITECTURES defaults to 52 (upstream's CMake already admits sm_52 in
 #     the experimental build since #3218 and sets -DSTRATA_EXPERIMENTAL_SM60=ON
-#     by itself when an arch is below 75 - no CMakeLists.txt patch is needed);
+#     by itself when an arch is below 75; the patch still edits CMakeLists.txt,
+#     because the 0.1.55 experimental build's moe_ws_down.cu emits f16x2 PTX that
+#     ptxas refuses below sm_53 - the patch's arch loop drops the weight-stationary
+#     expert kernels, the STRATA_PREFILL_WS define and their tests below sm_60);
 #   - local/maxwell.patch is applied in BOTH stage 1 (engine sources: src/core/device.cu;
 #     upstream's runtime floor is still 6.0 there without it) and stage 2 (the Terminal
 #     bundle's setup.py, whose sm60_card must admit 52 or setup calls the card unsupported);
@@ -52,7 +55,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /src
 COPY . .
 
-# The local Maxwell changes (see local/README.md): src/core/device.cu lowers the
+# The local Maxwell changes (see local/README.md): CMakeLists.txt drops the
+# weight-stationary expert kernels below sm_60 (moe_ws_down.cu's f16x2 PTX does
+# not assemble below sm_53; the WS path needs a cc 6.0 card at run time anyway,
+# so a Maxwell keeps its experts on MMQ / Q6K); src/core/device.cu lowers the
 # experimental build's runtime floor from 6.0 to 5.2 - upstream (#3218) built the
 # sm_52 floor into CMake but kept the runtime check at 6.0. Fails the build if
 # upstream changed a patched file - regenerate the patch against the new checkout.

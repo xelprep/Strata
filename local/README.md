@@ -28,8 +28,18 @@ regenerate recipe below is the way back if it ever fails.
   6.0, so a stock v0.2.9 engine built for 52 refuses itself at start) and
   `setup.py` (`sm60_card` must admit 52, or the Terminal's launch path calls a
   Maxwell card "not supported" — upstream's `maxwell_card`/`maxwell_note` only
-  print a warning and stop). Upstream's own Maxwell section of docs/OLDER_GPUS.md
-  (#3218) covers the CMake half now, so the patch no longer touches CMakeLists.txt.
+  print a warning and stop). It carries a third file now, `CMakeLists.txt`:
+  the 2026-11-01 sm_52 docker build died in `moe_ws_down.cu` with 400 ptxas
+  errors, "Feature 'f16 arithemetic and compare instructions' requires .target
+  sm_53 or higher" — the new 0.1.55 experimental build's weight-stationary
+  experts emit packed half-precision PTX (`hfma2`/`hadd2`/`h2sum`), which the
+  desktop Maxwell (sm_52, unlike sm_53) cannot assemble or execute. Upstream
+  never compiled those kernels below sm_60, so this hit our build first. The
+  patch's arch loop marks below-sm_60 CUDA builds (`set(_strata_ws_skip ON)`)
+  and the three `moe_ws` blocks — kernels, `STRATA_PREFILL_WS`, tests — skip:
+  `prefill.cpp` keeps its no-WS stubs, the experts go through MMQ / Q6K as on
+  the reporter's 0.1.44.1 M6000 build, and the WS path asks for a cc 6.0 card
+  at run time anyway. Pascal (60) and Volta (70) builds keep everything.
 - `Dockerfile` — a port of upstream's **new** source-build Dockerfile (upstream
   rewrote it on 2026-10-26: three stages, the engine shipped as an engine
   component package in `/opt/strata/components/engine`, entrypoint moved to
@@ -52,10 +62,10 @@ stay in sync with the checkout it applies to. If `patch -p1 < local/maxwell.patc
 fails during a build, upstream changed one of the patched files: regenerate the
 patch against the new checkout:
 
-    git checkout -- setup.py src/core/device.cu   # if needed
-    git --no-pager diff -- setup.py src/core/device.cu > local/maxwell.patch
+    git checkout -- setup.py src/core/device.cu CMakeLists.txt   # if needed
+    git --no-pager diff -- setup.py src/core/device.cu CMakeLists.txt > local/maxwell.patch
 
-(Regenerate only the engine-source files — the Dockerfile changes live in
+(Regenerate all three patched files — the Dockerfile changes live in
 `local/Dockerfile` itself, not in the patch.)
 
 ## After an upstream pull
@@ -66,6 +76,9 @@ rebuild the image (`docker build` recompiles the sm_52 engine once); the model
 files, the prepared pack and the install config on the `/data` volume are never
 touched.
 
-Checked against the 2026-10-31 pull (v0.2.9): the regenerated 36-line patch
-applies with no rejected hunks (`patch -p1 --dry-run`). The Docker build itself
-was not run here — it has to happen on the PC the Maxwell card is in.
+Checked against the 2026-10-31 pull (v0.2.9): the regenerated 81-line, three-file
+patch applies with no rejected hunks (`patch -p1 --dry-run`). The card PC's build
+of 2026-11-01 died in stage 1 with the `moe_ws_down.cu` ptxas errors above; the
+CMake skip is that build's fix. Rerun the `docker build` on the card PC: it should
+now reach stage 1's end (if more arch-52 compile errors show up, report them —
+upstream's Maxwell note, docs/OLDER_GPUS.md #3218, invites running reports).

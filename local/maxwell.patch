@@ -1,3 +1,48 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 692484a8..0346de04 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -270,6 +270,13 @@ elseif(STRATA_ENABLE_CUDA)
+     if(_base LESS 60)
+       message(WARNING "Building for sm_${_base} (Maxwell): community-tested on one reporter's Quadro M6000 only, "
+                       "no native half-precision arithmetic, CUDA 12.x toolkit required (docs/OLDER_GPUS.md).")
++      # Maxwell: the weight-stationary experts (moe_ws*.cu) assemble f16x2 PTX - moe_ws_down.cu's own
++      # hfma2 / hadd2 / h2sum helpers - which ptxas needs sm_53 or newer to build, so an arch-52
++      # nvcc pass fails there.  The WS path only ever runs where every visible GPU is cc 6.0
++      # (moe_ws.hpp's own gate), so below sm_60 the build leaves the kernels out entirely: prefill.cpp
++      # keeps its no-WS stubs (no STRATA_PREFILL_WS below) and the experts go through MMQ / Q6K, as on
++      # the reporter's 0.1.44.1 M6000 build.
++      set(_strata_ws_skip ON)
+     endif()
+     # #220 / #224: RTX 50 engines built with CUDA 12.8 crashed in the prompt path on Linux (13.0 and newer did not)
+     if(_base GREATER_EQUAL 120 AND CMAKE_CUDA_COMPILER_VERSION VERSION_LESS 13.0)
+@@ -2151,7 +2158,7 @@ if(STRATA_NATIVE_EXPERTS)
+     add_library(strata_mmq STATIC src/prefill/moe_mmq.cu src/prefill/moe_fused.cu src/prefill/moe_fused_iq.cu
+                 src/prefill/mmq_nvfp4_w4a8.cu
+                 src/prefill/ggml_cuda_host.cu ${_strata_quantize_cu})
+-    if(STRATA_EXPERIMENTAL_SM60 AND NOT STRATA_HIP_GFX906)
++    if(STRATA_EXPERIMENTAL_SM60 AND NOT STRATA_HIP_GFX906 AND NOT _strata_ws_skip)
+       # GP100 (sm_60): a resident layer's experts weight-stationary, one launch per product (moe_ws.hpp; opt-in at
+       # run time, STRATA_MMQ_WS=1, and only where every visible GPU is cc 6.0)
+       target_sources(strata_mmq PRIVATE src/prefill/moe_ws.cu src/prefill/moe_ws_gu_iq2.cu src/prefill/moe_ws_gu_iq3.cu
+@@ -2298,7 +2305,7 @@ if(STRATA_NATIVE_EXPERTS)
+     endif()
+     target_link_libraries(strata_prefill PUBLIC strata_mmq)
+     target_compile_definitions(strata_prefill PUBLIC STRATA_PREFILL_MMQ=1 STRATA_PREFILL_FUSED=1)
+-    if(STRATA_EXPERIMENTAL_SM60 AND NOT STRATA_HIP_GFX906)
++    if(STRATA_EXPERIMENTAL_SM60 AND NOT STRATA_HIP_GFX906 AND NOT _strata_ws_skip)
+       # the weight-stationary experts (moe_ws.hpp) are in strata_mmq: the prompt path may take them (STRATA_MMQ_WS=1)
+       target_compile_definitions(strata_prefill PUBLIC STRATA_PREFILL_WS=1)
+     endif()
+@@ -2334,7 +2341,7 @@ if(STRATA_NATIVE_EXPERTS)
+       target_link_libraries(prefill_mmq_scatter_test PRIVATE strata_mmq ggml-base ${_strata_gpu_runtime_target})
+       add_test(NAME prefill_mmq_scatter_test COMMAND prefill_mmq_scatter_test)
+       set_tests_properties(prefill_mmq_scatter_test PROPERTIES TIMEOUT 120)
+-      if(STRATA_EXPERIMENTAL_SM60)
++      if(STRATA_EXPERIMENTAL_SM60 AND NOT _strata_ws_skip)
+         # mmq::swiglu_quant: swiglu + the down product's q8_1 rows in one kernel against the two, byte for byte
+         add_executable(prefill_swiglu_quant_test tests/cuda/prefill_swiglu_quant_test.cpp)
+         target_link_libraries(prefill_swiglu_quant_test PRIVATE strata_mmq ggml-base ${_strata_gpu_runtime_target})
 diff --git a/setup.py b/setup.py
 index bd59a306..159112aa 100644
 --- a/setup.py
