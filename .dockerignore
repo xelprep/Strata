@@ -2,9 +2,11 @@
 # first start (inside the container or on the /data volume).
 .git
 
-# the staged Terminal sources local/Dockerfile's stage 2 reads (built here per build):
-# excluded from the rest of the context so staging it never re-hashes the engine layers
-terminal-src/
+# NOT ignored on purpose: local/Dockerfile's stage 2 reads the staged terminal-src/
+# (a COPY of an ignored path is an error - the build stops at "not found"). Staging
+# it only runs after the engine stage's COPYs, whose lists cover the engine files
+# only, so staging never invalidates the compiled sm_52 layers; only a change to a
+# stage-1-listed file (a git pull that touches them) recompiles the engine
 
 # local Python environment (rebuilt in the image)
 .venv/
