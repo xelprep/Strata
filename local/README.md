@@ -54,8 +54,19 @@ regenerate recipe below is the way back if it ever fails.
 
     git pull                              # origin = our fork: carries upstream + local/
     cp local/Dockerfile Dockerfile        # the local image layer
+    # stage 2 of the port reads terminal-src/ (upstream's staged layout): the Terminal's
+    # sources, the fork's committed local/ folder inside them - same file list as
+    # upstream's docker/build.sh, no engine package needed (stage 1 builds it)
+    mkdir -p terminal-src
+    git ls-files -z -- packaging bin strata.py strata_control strata_cli serve requirements.txt requirements-monitor.txt docs/MANAGEMENT_PROTOCOL.md docs/TERMINAL_LAUNCH.md data bench/prompts/standard-v1 setup.py ref/load.py CMakeLists.txt ':(glob)tools/**/*.py' | tar --null -T - -cf - | tar -xf - -C terminal-src
     docker build -t strata-maxwell --build-arg CUDA_ARCHITECTURES=52 \
                  --build-arg STRATA_COMMIT=$(git rev-parse HEAD) .
+
+Stage 1's COPY lists the engine's files (not `COPY . .`), so an edit to the Dockerfile, this
+README, terminal-src staging or the Terminal stage keeps the compiled sm_52 engine in the
+layer cache - only stage 2 runs again. A `git pull` that touches the engine sources
+(naturally) recompiles it. If stage 2's apt stops on a network slip, the split install layers
+let a rerun continue from the layer that already has python3/ca-certificates.
 
 The Dockerfile applies `local/maxwell.patch` during the build, so the patch must
 stay in sync with the checkout it applies to. If `patch -p1 < local/maxwell.patch`
@@ -74,7 +85,8 @@ The engine comes from the docker build now (stage 1 packages it for the image),
 not from a BUILD.json stamp: after a pull that touches the engine sources,
 rebuild the image (`docker build` recompiles the sm_52 engine once); the model
 files, the prepared pack and the install config on the `/data` volume are never
-touched.
+touched. A pull that only touches the Terminal (docs, packaging, serve/) keeps
+stage 1 in the cache and reruns just the Terminal stage.
 
 Checked against the 2026-10-31 pull (v0.2.9): the regenerated 81-line, three-file
 patch applies with no rejected hunks (`patch -p1 --dry-run`). The card PC's build

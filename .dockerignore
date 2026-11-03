@@ -2,6 +2,10 @@
 # first start (inside the container or on the /data volume).
 .git
 
+# the staged Terminal sources local/Dockerfile's stage 2 reads (built here per build):
+# excluded from the rest of the context so staging it never re-hashes the engine layers
+terminal-src/
+
 # local Python environment (rebuilt in the image)
 .venv/
 __pycache__/
