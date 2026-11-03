@@ -55,10 +55,12 @@ regenerate recipe below is the way back if it ever fails.
     git pull                              # origin = our fork: carries upstream + local/
     cp local/Dockerfile Dockerfile        # the local image layer
     # stage 2 of the port reads terminal-src/ (upstream's staged layout): the Terminal's
-    # sources, the fork's committed local/ folder inside them - same file list as
-    # upstream's docker/build.sh, no engine package needed (stage 1 builds it)
+    # sources plus two more paths - local/maxwell.patch itself and src/core/device.cu,
+    # the file the patch's third hunk edits, because stage 2 applies the patch inside
+    # /src and patch fails on a hunk whose file is missing (upstream's own list alone
+    # does not carry them, and terminal-src/ is deliberately NOT docker-ignored)
     mkdir -p terminal-src
-    git ls-files -z -- packaging bin strata.py strata_control strata_cli serve requirements.txt requirements-monitor.txt docs/MANAGEMENT_PROTOCOL.md docs/TERMINAL_LAUNCH.md data bench/prompts/standard-v1 setup.py ref/load.py CMakeLists.txt ':(glob)tools/**/*.py' | tar --null -T - -cf - | tar -xf - -C terminal-src
+    git ls-files -z -- packaging bin strata.py strata_control strata_cli serve requirements.txt requirements-monitor.txt docs/MANAGEMENT_PROTOCOL.md docs/TERMINAL_LAUNCH.md data bench/prompts/standard-v1 setup.py ref/load.py CMakeLists.txt local/maxwell.patch src/core/device.cu ':(glob)tools/**/*.py' | tar --null -T - -cf - | tar -xf - -C terminal-src
     docker build -t strata-maxwell --build-arg CUDA_ARCHITECTURES=52 \
                  --build-arg STRATA_COMMIT=$(git rev-parse HEAD) .
 

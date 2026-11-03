@@ -13,7 +13,9 @@
 #     expert kernels, the STRATA_PREFILL_WS define and their tests below sm_60);
 #   - local/maxwell.patch is applied in BOTH stage 1 (engine sources: src/core/device.cu;
 #     upstream's runtime floor is still 6.0 there without it) and stage 2 (the Terminal
-#     bundle's setup.py, whose sm60_card must admit 52 or setup calls the card unsupported);
+#    bundle's setup.py, whose sm60_card must admit 52 or setup calls the card unsupported) -
+#    stage 2's staging command therefore also carries local/maxwell.patch and
+#    src/core/device.cu, the files the patch reads there;
 #   - BUILD_VISION defaults to 0, the way upstream's own CUDA 12 recipe does for old cards;
 #   - stage 1's `COPY . .` became a per-folder COPY list, and stage 2 reads staged
 #     terminal-src/ like upstream's build.sh instead of `COPY . /src/` - so editing
@@ -25,7 +27,7 @@
 # the Terminal stage stops without the commit, like upstream's source builds):
 #   git pull
 #   cp local/Dockerfile Dockerfile
-#   mkdir -p terminal-src && git ls-files -z -- packaging bin strata.py strata_control strata_cli serve requirements.txt requirements-monitor.txt docs/MANAGEMENT_PROTOCOL.md docs/TERMINAL_LAUNCH.md data bench/prompts/standard-v1 setup.py ref/load.py CMakeLists.txt ':(glob)tools/**/*.py' | tar --null -T - -cf - | tar -xf - -C terminal-src
+#   mkdir -p terminal-src && git ls-files -z -- packaging bin strata.py strata_control strata_cli serve requirements.txt requirements-monitor.txt docs/MANAGEMENT_PROTOCOL.md docs/TERMINAL_LAUNCH.md data bench/prompts/standard-v1 setup.py ref/load.py CMakeLists.txt local/maxwell.patch src/core/device.cu ':(glob)tools/**/*.py' | tar --null -T - -cf - | tar -xf - -C terminal-src
 #   docker build -t strata-maxwell --build-arg CUDA_ARCHITECTURES=52 \
 #                --build-arg STRATA_COMMIT=$(git rev-parse HEAD) .      # Maxwell (experimental)
 #
@@ -82,9 +84,9 @@ COPY packaging/ packaging/
 COPY docker/ docker/
 COPY bench/ bench/
 COPY .dockerignore .dockerignore
-# upstream's `COPY . .` brought local/ in too - the .dockerignore excludes .git and local/ from
-# a whole-context COPY, so name the patch explicitly (an explicit COPY of an ignored path still
-# copies, which is how `COPY . .` carried it)
+# upstream's `COPY . .` brought local/ along with everything else; this stage lists only the
+# engine's own folders (so editing the port's Dockerfile or README no longer re-hashes the engine
+# layers), so the patch the RUN below reads is named explicitly here
 COPY local/maxwell.patch local/maxwell.patch
 
 # The local Maxwell changes (see local/README.md): CMakeLists.txt drops the
@@ -144,13 +146,14 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 # retry layer: patch/git come from build-essential above, so an interrupted network here does not undo the layer
 # above; this line changes only this layer (and the later Terminal layers), never the compiled engine stage
-RUN apt-get install -y --no-install-recommends git patch
+RUN apt-get update && apt-get install -y --no-install-recommends git patch && rm -rf /var/lib/apt/lists/*
 COPY terminal-src/ /src/
 # The same patch, so the Terminal's bundled setup.py admits Maxwell cards (sm60_card
 # covers 52): without this the launch path calls the card "not supported" and the
-# packaged sm_52 engine never starts. terminal-src/ already carries the fork's
-# committed local/ folder - no `COPY . /src/` here: that would re-copy the whole
-# checkout and, because of the checkout's timestamps, throw the compiled stage-1
+# packaged sm_52 engine never starts. The staging command above carries the patch file
+# itself AND src/core/device.cu (the patch's third hunk needs its target present, patch
+# exits non-zero without it) inside terminal-src/ - no `COPY . /src/`: that would re-copy
+# the whole checkout and, because of the checkout's timestamps, throw the compiled stage-1
 # engine layers out of the cache on every rebuild.
 RUN cd /src && patch -p1 < local/maxwell.patch
 RUN python3 /src/packaging/package_terminal.py --out /out --cache /cache \
