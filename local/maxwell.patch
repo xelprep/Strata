@@ -43,6 +43,22 @@ index 692484a8..0346de04 100644
          # mmq::swiglu_quant: swiglu + the down product's q8_1 rows in one kernel against the two, byte for byte
          add_executable(prefill_swiglu_quant_test tests/cuda/prefill_swiglu_quant_test.cpp)
          target_link_libraries(prefill_swiglu_quant_test PRIVATE strata_mmq ggml-base ${_strata_gpu_runtime_target})
+diff --git a/packaging/package_engine.py b/packaging/package_engine.py
+index 4d61fc5a..d9048768 100644
+--- a/packaging/package_engine.py
++++ b/packaging/package_engine.py
+@@ -175,7 +175,10 @@ def build(src: Path, backend: str, version: str, target: str, out: Path, *, entr
+         raise SystemExit(f"unknown backend {backend!r}")
+     if backend != "cpu" and not archs:
+         raise SystemExit(f"a {backend} package needs at least one --arch (sm_86, gfx1201, ...)")
+-    if backend == "cuda" and variant == "cuda12" and not any(a in ("sm_60", "sm_61", "sm_70") for a in archs):
++    # local Maxwell port (local/maxwell.patch, our local/Dockerfile): it knowingly packages a
++    # cuda12 engine for sm_52 Maxwell cards, so an sm_52 arch passes; the upstream check below is
++    # kept for every other build (it still refuses a cuda12 package built for sm_75 and up only)
++    if backend == "cuda" and variant == "cuda12" and "sm_52" not in archs and not any(a in ("sm_60", "sm_61", "sm_70") for a in archs):
+         # #3503: the cuda12 package is what the feed and docs/DOCKER.md offer to GTX 10 / P100 / V100; one built for
+         # sm_75 and up starts a restart loop on those cards ("this PC's GPU is sm_60")
+         raise SystemExit("refusing to package the cuda12 engine without sm_60, sm_61 or sm_70: it is the Pascal and Volta build "
 diff --git a/setup.py b/setup.py
 index bd59a306..159112aa 100644
 --- a/setup.py
