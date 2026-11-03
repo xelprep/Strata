@@ -14,14 +14,20 @@
 #   - local/maxwell.patch is applied in BOTH stage 1 (engine sources: src/core/device.cu;
 #     upstream's runtime floor is still 6.0 there without it) and stage 2 (the Terminal
 #     bundle's setup.py, whose sm60_card must admit 52 or setup calls the card unsupported);
-#   - BUILD_VISION defaults to 0, the way upstream's own CUDA 12 recipe does for old cards.
+#   - BUILD_VISION defaults to 0, the way upstream's own CUDA 12 recipe does for old cards;
+#   - stage 1's `COPY . .` became a per-folder COPY list, and stage 2 reads staged
+#     terminal-src/ like upstream's build.sh instead of `COPY . /src/` - so editing
+#     this file or the Terminal stage no longer recompiles the sm_52 engine every
+#     build (a whole-context COPY re-hashes every stage-1 layer); stage 2's apt
+#     split into two layers so a network slip retries without undoing the first.
 #
 # Build (on the PC the card is in — native CPU code and the CUDA card both matter;
 # the Terminal stage stops without the commit, like upstream's source builds):
 #   git pull
 #   cp local/Dockerfile Dockerfile
+#   mkdir -p terminal-src && git ls-files -z -- packaging bin strata.py strata_control strata_cli serve requirements.txt requirements-monitor.txt docs/MANAGEMENT_PROTOCOL.md docs/TERMINAL_LAUNCH.md data bench/prompts/standard-v1 setup.py ref/load.py CMakeLists.txt ':(glob)tools/**/*.py' | tar --null -T - -cf - | tar -xf - -C terminal-src
 #   docker build -t strata-maxwell --build-arg CUDA_ARCHITECTURES=52 \
-#              --build-arg STRATA_COMMIT=$(git rev-parse HEAD) .      # Maxwell (experimental)
+#                --build-arg STRATA_COMMIT=$(git rev-parse HEAD) .      # Maxwell (experimental)
 #
 # Run (host needs an NVIDIA driver >= 580 and nvidia-container-toolkit; upstream's
 # CUDA 12 packages ask for 575.51, the Maxwell reporter's M6000 ran driver 580):
@@ -53,7 +59,30 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential ca-certificates git libgomp1 libatomic1 python3 python3-pip python3-venv unzip patch \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
-COPY . .
+# two COPY steps instead of upstream's one: the engine stage only reads the engine files (CMakeLists, src, tools,
+# packaging, data, requirements*.txt) and the patched llama.cpp setup.py reads - never the local/ folder or
+# terminal-src/. A later edit to this Dockerfile, README or the Terminal stage therefore keeps the compiled stage-1
+# layers in the cache instead of recompiling the sm_52 engine (the old one-COPY port threw the whole stage-1 cache away on any edit)
+COPY CMakeLists.txt .
+COPY requirements-build.txt requirements.txt setup.py .
+COPY third_party/ third_party/
+COPY cmake/ cmake/
+COPY data/ data/
+COPY include/ include/
+COPY metal/ metal/
+COPY ref/ ref/
+COPY serve/ serve/
+COPY src/ src/
+COPY tests/ tests/
+COPY tools/ tools/
+COPY packaging/ packaging/
+COPY docker/ docker/
+COPY bench/ bench/
+COPY .dockerignore .dockerignore
+# upstream's `COPY . .` brought local/ in too - the .dockerignore excludes .git and local/ from
+# a whole-context COPY, so name the patch explicitly (an explicit COPY of an ignored path still
+# copies, which is how `COPY . .` carried it)
+COPY local/maxwell.patch local/maxwell.patch
 
 # The local Maxwell changes (see local/README.md): CMakeLists.txt drops the
 # weight-stationary expert kernels below sm_60 (moe_ws_down.cu's f16x2 PTX does
@@ -107,11 +136,19 @@ FROM ${RUNTIME_BASE} AS terminal
 ARG STRATA_COMMIT=
 ENV STRATA_BUILD_COMMIT=${STRATA_COMMIT}
 ENV DEBIAN_FRONTEND=noninteractive
-RUN apt-get update && apt-get install -y --no-install-recommends python3 ca-certificates git patch && rm -rf /var/lib/apt/lists/*
-COPY . /src/
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends python3 ca-certificates build-essential \
+ && rm -rf /var/lib/apt/lists/*
+# retry layer: patch/git come from build-essential above, so an interrupted network here does not undo the layer
+# above; this line changes only this layer (and the later Terminal layers), never the compiled engine stage
+RUN apt-get install -y --no-install-recommends git patch
+COPY terminal-src/ /src/
 # The same patch, so the Terminal's bundled setup.py admits Maxwell cards (sm60_card
 # covers 52): without this the launch path calls the card "not supported" and the
-# packaged sm_52 engine never starts.
+# packaged sm_52 engine never starts. terminal-src/ already carries the fork's
+# committed local/ folder - no `COPY . /src/` here: that would re-copy the whole
+# checkout and, because of the checkout's timestamps, throw the compiled stage-1
+# engine layers out of the cache on every rebuild.
 RUN cd /src && patch -p1 < local/maxwell.patch
 RUN python3 /src/packaging/package_terminal.py --out /out --cache /cache \
  && mkdir -p /opt/strata \
