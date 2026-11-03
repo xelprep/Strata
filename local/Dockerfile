@@ -65,6 +65,9 @@ WORKDIR /src
 # layers in the cache instead of recompiling the sm_52 engine (the old one-COPY port threw the whole stage-1 cache away on any edit)
 COPY CMakeLists.txt .
 COPY requirements-build.txt requirements.txt setup.py .
+# setup.py imports strata_control at its top (acquisition, tls, atomic...) - it must be in the
+# engine stage too, the terminal bundle carries it through terminal-src/
+COPY strata_control/ strata_control/
 COPY third_party/ third_party/
 COPY cmake/ cmake/
 COPY data/ data/
