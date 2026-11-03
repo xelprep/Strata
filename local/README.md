@@ -75,10 +75,10 @@ stay in sync with the checkout it applies to. If `patch -p1 < local/maxwell.patc
 fails during a build, upstream changed one of the patched files: regenerate the
 patch against the new checkout:
 
-    git checkout -- setup.py src/core/device.cu CMakeLists.txt   # if needed
-    git --no-pager diff -- setup.py src/core/device.cu CMakeLists.txt > local/maxwell.patch
+    git checkout -- setup.py src/core/device.cu CMakeLists.txt packaging/package_engine.py   # if needed
+    git --no-pager diff -- setup.py src/core/device.cu CMakeLists.txt packaging/package_engine.py > local/maxwell.patch
 
-(Regenerate all three patched files — the Dockerfile changes live in
+(Regenerate all four patched files — the Dockerfile changes live in
 `local/Dockerfile` itself, not in the patch.)
 
 ## After an upstream pull
@@ -90,9 +90,14 @@ files, the prepared pack and the install config on the `/data` volume are never
 touched. A pull that only touches the Terminal (docs, packaging, serve/) keeps
 stage 1 in the cache and reruns just the Terminal stage.
 
-Checked against the 2026-10-31 pull (v0.2.9): the regenerated 81-line, three-file
+Checked against the 2026-10-31 pull (v0.2.9): the regenerated 97-line, four-file
 patch applies with no rejected hunks (`patch -p1 --dry-run`). The card PC's build
 of 2026-11-01 died in stage 1 with the `moe_ws_down.cu` ptxas errors above; the
-CMake skip is that build's fix. Rerun the `docker build` on the card PC: it should
-now reach stage 1's end (if more arch-52 compile errors show up, report them —
-upstream's Maxwell note, docs/OLDER_GPUS.md #3218, invites running reports).
+CMake skip is that build's fix. The same card build then died at its packaging step
+with `refusing to package the cuda12 engine without sm_60, sm_61 or sm_70` - `packaging/package_engine.py`'s
+feed guard (#3503): a `variant=cuda12` package is what the feed offers Pascal / Volta
+cards, so it must carry that machine code; our port knowingly packages a Maxwell
+`cuda12` build, so the patch admits an `sm_52` arch there too (the guard keeps refusing
+any other cuda12 arch mix). Rerun the `docker build` on the card PC: it should now reach
+stage 1's end (if more arch-52 compile errors show up, report them - upstream's Maxwell
+note, docs/OLDER_GPUS.md #3218, invites running reports).
